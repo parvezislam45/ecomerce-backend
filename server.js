@@ -43,35 +43,97 @@ async function run() {
     const orderCollection = client.db("order").collection("allOrder");
   
     app.get("/product", async (req, res) => {
-      const query = {};
+      let query = {}; // Initialize an empty query object
+      
+      // Check if discountPercentage query parameter exists and is a valid number
+      if (req.query.discountPercentage && !isNaN(parseInt(req.query.discountPercentage))) {
+          const discountPercentage = parseInt(req.query.discountPercentage);
+          query = {
+              "discount.percentage": discountPercentage
+          };
+      }
+  
       const cursor = productCollection.find(query);
       const products = await cursor.toArray();
       res.send(products);
-    });
+  });
+  
     
     app.get("/product/:id", async (req, res) => {
+      
       const id = req.params.id;
       const result = await productCollection.findOne({ _id:new ObjectId(id) });
       res.send(result);
     });
     
-
-    app.post("/product", async (req, res) => {
-      const { name, description } = req.body;
+    app.get("/product/user/:email", async (req, res) => {
+      const email = req.params.email
+      const query = { email: email }
+      const users = await productCollection.find(query).toArray();
+      res.send(users);
+    });
+    
+    app.post("/product", upload.array('images', 4), async (req, res) => {
       try {
-        const result = await productCollection.insertOne({
-          name,
-          description,
-          status: "pending",
-        });
-        const newProduct = await productCollection.findOne({ _id: result.insertedId });
-        res.status(201).json(newProduct);
+        const status = req.body.status || 'pending';
+        const newProduct = {
+          userName: req.body.userName,
+          name: req.body.name,
+          email: req.body.email,
+          description: req.body.description,
+          category: req.body.category,
+          price: req.body.price,
+          images: req.files.map(file => file.filename),
+          status: status
+        };
+      
+        const result = await productCollection.insertOne(newProduct);
+        res.send(result);
       } catch (error) {
-        console.error("Error saving product:", error);
-        res.status(500).json({ message: "Error submitting product." });
+        console.error('Error:', error);
+        res.status(500).send('Server Error');
       }
     });
     
+
+    app.put("/product/:id", upload.none(), async (req, res) => {
+      try {
+        const id = req.params.id;
+        const data = req.body;
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = { $set: {} };
+    
+        // Update product details
+        if (data.name) updateDoc.$set.name = data.name;
+        if (data.description) updateDoc.$set.description = data.description;
+        if (data.price) updateDoc.$set.price = data.price;
+        if (data.category) updateDoc.$set.category = data.category;
+    
+        // Handle discount
+        if (data.discount) {
+          const discountPercentage = parseInt(data.discount);
+          if (!isNaN(discountPercentage) && discountPercentage > 0 && discountPercentage <= 100) {
+            const discountedPrice = data.price - (data.price * discountPercentage) / 100;
+            updateDoc.$set.discount = { discountPercentage };
+            updateDoc.$set.price = discountedPrice;
+          }
+        }
+    
+        const result = await productCollection.updateOne(filter, updateDoc);
+        if (result.modifiedCount === 0) {
+          return res.status(500).send("Failed to update product");
+        }
+    
+        res.send("Product updated successfully");
+      } catch (error) {
+        console.error("Error updating product:", error);
+        res.status(500).send("Error updating product");
+      }
+    });
+    
+    
+    
+
     app.put('/product/:id/approve', async (req, res) => {
       const productId = req.params.id;
       try {
@@ -165,7 +227,7 @@ app.post("/user", upload.array('images', 2), async (req, res) => {
       company: req.body.company,
       district: req.body.district,
       address: req.body.address,
-      images: req.files.map(file => file.filename), // Use req.files to get an array of uploaded files
+      images: req.files.map(file => file.filename),
       status: status
     };
   
