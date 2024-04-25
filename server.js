@@ -4,6 +4,7 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const app = express();
 const multer = require('multer');
 const path = require('path');
+const fs = require('fs');
 const port = process.env.PORT || 7000;
 
 // --------MiddleWire------------
@@ -59,12 +60,12 @@ async function run() {
   });
   
     
-    app.get("/product/:id", async (req, res) => {
+  app.get("/product/:id", async (req, res) => {
       
-      const id = req.params.id;
-      const result = await productCollection.findOne({ _id:new ObjectId(id) });
-      res.send(result);
-    });
+    const id = req.params.id;
+    const result = await productCollection.findOne({ _id:new ObjectId(id) });
+    res.send(result);
+  });
     
     app.get("/product/user/:email", async (req, res) => {
       const email = req.params.email
@@ -73,7 +74,7 @@ async function run() {
       res.send(users);
     });
     
-    app.post("/product", upload.array('images', 4), async (req, res) => {
+    app.post("/product", upload.single('image'), async (req, res) => {
       try {
         const status = req.body.status || 'pending';
         const newProduct = {
@@ -83,7 +84,7 @@ async function run() {
           description: req.body.description,
           category: req.body.category,
           price: req.body.price,
-          images: req.files.map(file => file.filename),
+          image: req.file.filename,
           status: status
         };
       
@@ -94,9 +95,8 @@ async function run() {
         res.status(500).send('Server Error');
       }
     });
-    
 
-    app.put("/product/:id", upload.none(), async (req, res) => {
+    app.put("/product/:id", upload.single('image'), async (req, res) => {
       try {
         const id = req.params.id;
         const data = req.body;
@@ -108,7 +108,11 @@ async function run() {
         if (data.description) updateDoc.$set.description = data.description;
         if (data.price) updateDoc.$set.price = data.price;
         if (data.category) updateDoc.$set.category = data.category;
-    
+        if (req.file) updateDoc.$set.image = req.file.filename; 
+        const existingProduct = await productCollection.findOne(filter);
+        if (req.file && existingProduct.image) {
+          fs.unlinkSync(path.join(__dirname, 'uploads', existingProduct.image)); 
+        }
         // Handle discount
         if (data.discount) {
           const discountPercentage = parseInt(data.discount);
@@ -118,7 +122,7 @@ async function run() {
             updateDoc.$set.price = discountedPrice;
           }
         }
-    
+        updateDoc.$set.status = "pending";
         const result = await productCollection.updateOne(filter, updateDoc);
         if (result.modifiedCount === 0) {
           return res.status(500).send("Failed to update product");
@@ -132,8 +136,16 @@ async function run() {
     });
     
     
-    
-
+    app.get("/discount", async (req, res) => {
+      try {
+        const discountPercentage = parseInt(req.query.discountPercentage);
+        const products = await productCollection.find({ "discount.discountPercentage": discountPercentage }).toArray();
+        res.json(products);
+      } catch (error) {
+        console.error('Error fetching discounted products:', error);
+        res.status(500).send("Error fetching discounted products");
+      }
+    });
     app.put('/product/:id/approve', async (req, res) => {
       const productId = req.params.id;
       try {
@@ -189,33 +201,7 @@ app.put("/product/:id/reject", async (req, res) => {
       }
     });
 
-//     app.post('/user', upload.fields([{ name: 'image1', maxCount: 1 }, { name: 'image2', maxCount: 1 }]), async (req, res) => {
-//   try {
-//     const { name, email, company, district, role, address } = req.body;
-//     const status = req.body.status || 'pending';
 
-//     // Check if 'image1' and 'image2' exist in req.files before accessing their properties
-//     const image1 = req.files && req.files['image1'] ? req.files['image1'][0].path : null;
-//     const image2 = req.files && req.files['image2'] ? req.files['image2'][0].path : null;
-
-//     const result = await userCollection.insertOne({
-//       name: name,
-//       email: email,
-//       company: company,
-//       address: address,
-//       district: district,
-//       role: role,
-//       status: status,
-//       image1: image1,
-//       image2: image2,
-//     });
-
-//     res.status(200).json({ message: 'Data inserted successfully.', data: result });
-//   } catch (error) {
-//     console.error('Error:', error);
-//     res.status(500).json({ error: 'Internal server error.' });
-//   }
-// });
 
 app.post("/user", upload.array('images', 2), async (req, res) => {
   try {
@@ -362,18 +348,6 @@ app.post("/user", upload.array('images', 2), async (req, res) => {
       const cursor = productCollection.find(query);
       const products = await cursor.toArray();
       res.send(products);
-    });
-
-    // -------------------------admin--------------------------
-
-    
-
-    // ----------------------------- Role Product ---------------------
-
-    app.post("/products", async (req, res) => {
-      const newProduct = req.body;
-      const result = await roleProductCollection.insertOne(newProduct);
-      res.send(result);
     });
   } finally {
   }
