@@ -6,6 +6,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const port = process.env.PORT || 7000;
+const crypto = require("crypto");
 
 // --------MiddleWire------------
 
@@ -20,7 +21,9 @@ const storage = multer.diskStorage({
       cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname))
   }
 });
-
+const generateVerificationToken = () => {
+  return crypto.randomBytes(20).toString("hex");
+};
 const upload = multer({ storage: storage });
 
 const uri =
@@ -38,15 +41,13 @@ async function run() {
     await client.connect();
     const productCollection = client.db("ecomerce").collection("product");
     const userCollection = client.db("user").collection("allUser");
-    const roleProductCollection = client
-      .db("roleProduct")
-      .collection("allRoleProduct");
+    const favoriteProductCollection = client
+      .db("favoriteProduct")
+      .collection("allFavoriteProduct");
     const orderCollection = client.db("order").collection("allOrder");
   
     app.get("/product", async (req, res) => {
-      let query = {}; // Initialize an empty query object
-      
-      // Check if discountPercentage query parameter exists and is a valid number
+      let query = {};
       if (req.query.discountPercentage && !isNaN(parseInt(req.query.discountPercentage))) {
           const discountPercentage = parseInt(req.query.discountPercentage);
           query = {
@@ -102,8 +103,6 @@ async function run() {
         const data = req.body;
         const filter = { _id: new ObjectId(id) };
         const updateDoc = { $set: {} };
-    
-        // Update product details
         if (data.name) updateDoc.$set.name = data.name;
         if (data.description) updateDoc.$set.description = data.description;
         if (data.price) updateDoc.$set.price = data.price;
@@ -113,7 +112,6 @@ async function run() {
         if (req.file && existingProduct.image) {
           fs.unlinkSync(path.join(__dirname, 'uploads', existingProduct.image)); 
         }
-        // Handle discount
         if (data.discount) {
           const discountPercentage = parseInt(data.discount);
           if (!isNaN(discountPercentage) && discountPercentage > 0 && discountPercentage <= 100) {
@@ -153,7 +151,7 @@ async function run() {
           { _id: new ObjectId(productId) },
           { $set: { status: 'approved' } }
         );
-        if (result.modifiedCount === 0) {
+        if (result.modifiedCount !== 0) {
           res.status(200).json({ message: 'Product approved successfully.' });
         } else {
           res.status(404).json({ message: 'Product not found.' });
@@ -184,6 +182,7 @@ app.put("/product/:id/reject", async (req, res) => {
   res.send(result);
 });
     // ---------------------- User --------------------------------
+
 
     app.put("/admin/approve/:userId", async (req, res) => {
       const userId = req.params.userId;
@@ -324,6 +323,28 @@ app.post("/user", upload.array('images', 2), async (req, res) => {
       const result = await orderCollection.insertOne(order)
       res.send(result)
     })
+
+    app.post("/favorite", async (req, res) => {
+      try {
+        const favorite = req.body;
+        const result = await favoriteProductCollection.insertOne(favorite);
+        res.status(201).json({ success: true, message: "Favorite item added successfully", data: result });
+      } catch (error) {
+        console.error("Error saving favorite item:", error);
+        res.status(500).json({ success: false, message: "Failed to add favorite item", error: error.message });
+      }
+    });
+    app.get("/favorite", async (req, res) => {
+      const items = await favoriteProductCollection.find().toArray();
+      res.send(items);
+    });
+
+    app.get("/favorite/user/:email", async (req, res) => {
+      const email = req.params.email
+      const query = { email: email }
+      const users = await favoriteProductCollection.find(query).toArray();
+      res.send(users);
+    });
 
     app.get("/order", async (req, res) => {
       const users = await orderCollection.find().toArray();
